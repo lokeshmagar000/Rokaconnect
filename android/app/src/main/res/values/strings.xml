@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="island_a11y_description">Lets the Rokaconnect island draw above the status bar around your camera and respond to taps, and notices when you tap Copy so your clipboard can go to your Mac. It does not read your screen content or anything you type.</string>
+</resources>

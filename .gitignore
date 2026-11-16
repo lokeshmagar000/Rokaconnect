@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+
+# Mac app build output
+.build/
+build/
+*.dmg
+AppIcon.iconset/
+
+# Downloaded and built by build.sh
+Vendor/
+
+# Android build output and local settings
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+*.iml
+*.apk
+*.keystore
+*.jks
