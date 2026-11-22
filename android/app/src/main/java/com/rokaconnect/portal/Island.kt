@@ -314,6 +314,7 @@ class IslandService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        UsbLink.start()     // background check-ins use the USB cable when it is plugged in
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel("island", "Connection", NotificationManager.IMPORTANCE_MIN))
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)

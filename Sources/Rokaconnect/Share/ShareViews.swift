@@ -127,11 +127,6 @@ struct SendCard: View {
                         NearbyShare.shared.send(hub.staged, to: p); hub.staged = []
                     }
                 }
-                DeviceChip(icon: "qrcode", name: "Any phone", sub: "QR code", primary: false) {
-                    hub.addToOutbox(hub.staged); hub.staged = []
-                    (NSApp.delegate as? AppDelegate)?.openSettings()
-                    NotificationCenter.default.post(name: .openPortalPage, object: nil)
-                }
                 if hub.onlinePhones.isEmpty && hub.androidPeers.isEmpty {
                     Text("Open Rokaconnect on your phone (same Wi-Fi) and it shows up here.")
                         .font(.system(size: 11)).foregroundStyle(.white.opacity(0.55))
@@ -230,7 +225,6 @@ func stageDrop(_ providers: [NSItemProvider]) -> Bool {
 struct ShareHubSection: View {
     @ObservedObject var s = Settings.shared
     @ObservedObject var hub = TransferHub.shared
-    @ObservedObject var web = WebShare.shared
 
     var body: some View {
         SectionLabel("Phones with the Rokaconnect app")
@@ -268,41 +262,6 @@ struct ShareHubSection: View {
             }
         }
         Caption("Receive: on Android tap Share → Quick Share and pick “\(Host.current().localizedName ?? "this Mac")”, and files arrive straight away (turn off “Accept without asking” to approve each one in the island). Send: open Quick Share on the phone (or set it to Everyone) so it appears above, or drop files on the notch. Both need the same Wi-Fi.")
-
-        SectionLabel("Any phone — browser")
-        Card {
-            ToggleRow(title: "Share with a QR code", on: $s.webShare)
-            if s.webShare {
-                HStack(alignment: .top, spacing: 14) {
-                    if let qr = web.qr {
-                        Image(nsImage: qr).interpolation(.none).resizable().frame(width: 128, height: 128)
-                            .padding(8).background(RoundedRectangle(cornerRadius: 12).fill(.white))
-                    }
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(web.status).font(.system(size: 11.5)).opacity(0.75).fixedSize(horizontal: false, vertical: true)
-                        if let u = web.url {
-                            Text(u.absoluteString).font(.system(size: 10.5, design: .monospaced)).textSelection(.enabled).opacity(0.6).lineLimit(2)
-                        }
-                        HStack {
-                            GlassPill(title: "Offer files…", icon: "plus") { hub.pickFiles { hub.addToOutbox($0) } }
-                            GlassPill(title: "New link", icon: "arrow.clockwise") { web.newLink() }
-                        }
-                    }
-                }
-                if !hub.outbox.isEmpty {
-                    Text("Offered to phones").font(.system(size: 11, weight: .semibold)).opacity(0.6).padding(.top, 4)
-                    ForEach(hub.outbox, id: \.self) { u in
-                        HStack {
-                            Image(nsImage: NSWorkspace.shared.icon(forFile: u.path)).resizable().frame(width: 18, height: 18)
-                            Text(u.lastPathComponent).font(.system(size: 12)).lineLimit(1)
-                            Spacer()
-                            Button { hub.removeFromOutbox(u) } label: { Image(systemName: "minus.circle.fill").opacity(0.6) }.buttonStyle(.plain)
-                        }
-                    }
-                }
-            }
-        }
-        Caption("Phones send files and text to this Mac, and can save anything you offer here. Only someone who scans the code (or has the link) can connect; “New link” cuts off old ones.")
     }
 }
 

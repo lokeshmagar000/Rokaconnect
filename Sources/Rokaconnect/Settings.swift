@@ -36,14 +36,12 @@ final class Settings: ObservableObject {
     @Published var soundVolume: Double { didSet { Self.d.set(soundVolume, forKey: "soundVolume") } }
     @Published var outputChange: Bool { didSet { Self.d.set(outputChange, forKey: "outputChange") } }
     @Published var overlayDuration: Double { didSet { Self.d.set(overlayDuration, forKey: "overlayDuration") } }
-    @Published var settingsLook: IslandTheme { didSet { Self.d.set(settingsLook.rawValue, forKey: "settingsLook") } }
     @Published var portalEffects: Bool { didSet { Self.d.set(portalEffects, forKey: "portalEffects") } }
     @Published var portalStyle: String { didSet { Self.d.set(portalStyle, forKey: "portalStyle2") } }
     @Published var androidShare: Bool { didSet { Self.d.set(androidShare, forKey: "androidShare"); NearbyShare.shared.setEnabled(androidShare) } }
     @Published var autoAcceptShares: Bool { didSet { Self.d.set(autoAcceptShares, forKey: "autoAcceptShares") } }
     /// Keep the Mac and phone clipboards in sync automatically.
     @Published var autoClipboard: Bool { didSet { Self.d.set(autoClipboard, forKey: "autoClipboard") } }
-    @Published var webShare: Bool { didSet { Self.d.set(webShare, forKey: "webShare"); WebShare.shared.setEnabled(webShare) } }
 
     init() {
         let d = Self.d
@@ -60,9 +58,8 @@ final class Settings: ObservableObject {
         soundVolume = d.object(forKey: "soundVolume") as? Double ?? 1
         outputChange = b("outputChange", true)
         overlayDuration = d.object(forKey: "overlayDuration") as? Double ?? 4
-        settingsLook = IslandTheme(rawValue: d.string(forKey: "settingsLook") ?? "") ?? .glass
         portalEffects = b("portalEffects", true); portalStyle = d.string(forKey: "portalStyle2") ?? "portal"   // new key: everyone starts on the portal
-        androidShare = b("androidShare", true); webShare = b("webShare", true); autoAcceptShares = b("autoAcceptShares", true); autoClipboard = b("autoClipboard", true)
+        androidShare = b("androidShare", true); autoAcceptShares = b("autoAcceptShares", true); autoClipboard = b("autoClipboard", true)
         weatherOn = b("weatherOn", true); fahrenheit = b("fahrenheit", false); podsAlerts = b("podsAlerts", true)
     }
 
@@ -356,11 +353,12 @@ struct MediaPage: View {
             HStack {
                 Text("EQ").font(.system(size: 12.5, weight: .medium))
                 Spacer()
-                Picker("", selection: $eq.bundleID) { ForEach(eq.apps, id: \.id) { Text($0.name).tag($0.id) } }
+                Picker("", selection: Binding(get: { eq.bundleID }, set: { eq.choose($0) })) { ForEach(eq.apps, id: \.id) { Text($0.name).tag($0.id) } }
                     .labelsHidden().frame(width: 150).controlSize(.small)
                 Toggle("", isOn: Binding(get: { eq.enabled }, set: { eq.setEnabled($0) })).toggleStyle(.switch).labelsHidden().controlSize(.small)
             }
         }
+        Caption("macOS shows a purple dot while the EQ is working. That is normal: the sound is only changed and played, never saved or sent.")
         Card {
             HStack(spacing: 0) {
                 ForEach(0..<5, id: \.self) { i in

@@ -41,14 +41,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         _ = lockScreen
         _ = buds
         portal.start()
+        USBLink.shared.start()      // USB cable mode: links plugged-in phones through the cable (needs adb)
         TransferHub.shared.startClipboardWatch()   // automatic Mac → phone clipboard
         _ = EQManager.shared        // start the equalizer at launch (it used to wait until Settings → Media was opened)
         if Settings.shared.androidShare { NearbyShare.shared.start() }
-        if Settings.shared.webShare { WebShare.shared.start() }
         if UserDefaults.standard.bool(forKey: "debugShareSelfTest") { NearbyShare.shared.selfTest() }
-        if UserDefaults.standard.bool(forKey: "debugEQPeak") {     // diagnostics: report what the EQ hears
+        #if DEBUG   // diagnostics for test builds only: report what the EQ hears
+        if UserDefaults.standard.bool(forKey: "debugEQPeak") {
             Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in NSLog("[EQ] peak %.5f status %@", EQManager.peak, EQManager.shared.status); EQManager.peak = 0 }
         }
+        #endif
         if let p = UserDefaults.standard.string(forKey: "debugOutbox") { TransferHub.shared.addToOutbox([URL(fileURLWithPath: p)]) }
         if let p = UserDefaults.standard.string(forKey: "debugDirect") {    // test aid: send straight to the first phone that checks in
             Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { t in
@@ -299,8 +301,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         panel.setFrame(NSRect(x: screen.frame.midX - w/2, y: screen.frame.maxY - h, width: w, height: h), display: true)
     }
 
-    /// Menu bar → the phone app receives the Mac's clipboard on its next check-in (a few seconds).
-    @objc func sendClipboardToPhone() { TransferHub.shared.sendClipboardToPhone() }
 
     @objc func openSettings() {
         if TouchAuth.shared.locked && Settings.shared.faceID {      // "faceID" key now means "lock with Touch ID"

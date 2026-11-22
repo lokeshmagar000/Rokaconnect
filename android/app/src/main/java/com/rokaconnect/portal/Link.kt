@@ -59,6 +59,8 @@ object Link {
     fun paired(c: Context) = key(c) != null
 
     fun target(c: Context, found: List<MacFinder.Mac>): Pair<String, Int>? {
+        // USB cable plugged in (the Mac set up `adb reverse`): go through the cable, it's much faster than Wi-Fi
+        if (UsbLink.active) return "127.0.0.1" to Portal.PORT
         val p = prefs(c)
         p.getString("host", "")?.trim()?.takeIf { it.isNotEmpty() }?.let { h ->
             val parts = h.split(":"); return parts[0] to (parts.getOrNull(1)?.toIntOrNull() ?: Portal.PORT)
@@ -84,6 +86,34 @@ object Link {
     /** Keep the phone and Mac clipboards in sync automatically. */
     fun autoClip(c: Context) = prefs(c).getBoolean("autoClip", true)
     fun setAutoClip(c: Context, on: Boolean) { prefs(c).edit().putBoolean("autoClip", on).apply() }
+}
+
+/**
+ * USB cable mode. When the phone is plugged into the Mac with USB debugging on, Rokaconnect on the Mac runs
+ * `adb reverse`, so the Mac answers on 127.0.0.1 here — through the cable. This checks for that every 2 s
+ * (a refused local connection costs almost nothing) and [Link.target] then prefers the cable over Wi-Fi.
+ */
+object UsbLink {
+    @Volatile var active = false
+        private set
+    /** For the screen: true while the cable link is up. */
+    val state = mutableStateOf(false)
+    private val main = Handler(Looper.getMainLooper())
+    @Volatile private var started = false
+
+    fun start() {
+        if (started) return
+        started = true
+        kotlin.concurrent.thread(isDaemon = true, name = "usb-probe") {
+            while (true) {
+                val ok = runCatching {
+                    java.net.Socket().use { it.connect(java.net.InetSocketAddress("127.0.0.1", Portal.PORT), 300) }; true
+                }.getOrDefault(false)
+                if (ok != active) { active = ok; main.post { state.value = ok } }
+                Thread.sleep(2_000)
+            }
+        }
+    }
 }
 
 /** Saves files the Mac sent straight to this phone ("direct" items), once each. */
@@ -126,6 +156,5 @@ fun openApp(c: Context, action: String? = null) {
 }
 
 const val ACTION_PICK_FILES = "com.rokaconnect.portal.PICK_FILES"
-const val ACTION_SEND_CLIPBOARD = "com.rokaconnect.portal.SEND_CLIPBOARD"
 const val ACTION_PICK_PHOTOS = "com.rokaconnect.portal.PICK_PHOTOS"
 

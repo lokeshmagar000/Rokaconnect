@@ -1,6 +1,5 @@
 package com.rokaconnect.portal
 
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -53,6 +52,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        UsbLink.start()     // watch for the USB cable link to the Mac
         // light status/nav icons on the dark glass background
         enableEdgeToEdge(SystemBarStyle.dark(android.graphics.Color.TRANSPARENT), SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         state = AppState(applicationContext)
@@ -84,17 +84,16 @@ class AppState(val ctx: Context) {
     var message by mutableStateOf("")
     var busyPairing by mutableStateOf(false)
     val transfers get() = TransferLog.items
-    /** Set by the island's quick menu: open the picker / send the clipboard as soon as the screen is up. */
+    /** Set by the island's quick menu: open the file or photo picker as soon as the screen is up. */
     var pickRequest by mutableStateOf(false)
     var photoRequest by mutableStateOf(false)
-    var clipRequest by mutableStateOf(false)
     var autoReceive by mutableStateOf(Link.autoReceive(ctx))
     val pendingShares = mutableStateListOf<Uri>()
     var pendingText by mutableStateOf<String?>(null)
 
-    /** Manual address wins; otherwise the first Mac found on the network. */
+    /** USB cable first (fastest), then a manual address, then the first Mac found on the network. */
     val target: Pair<String, Int>?
-        get() = manualHost.trim().takeIf { it.isNotEmpty() }?.let { h ->
+        get() = (if (UsbLink.active) "127.0.0.1" to Portal.PORT else null) ?: manualHost.trim().takeIf { it.isNotEmpty() }?.let { h ->
             val parts = h.split(":"); parts[0] to (parts.getOrNull(1)?.toIntOrNull() ?: Portal.PORT)
         } ?: finder.macs.firstOrNull()?.let { it.host to it.port }
             ?: qrHost.takeIf { it.isNotEmpty() }?.let { it to qrPort }
@@ -156,7 +155,6 @@ class AppState(val ctx: Context) {
             Intent.ACTION_VIEW -> pendingLink = intent.dataString
             ACTION_PICK_FILES -> pickRequest = true
             ACTION_PICK_PHOTOS -> photoRequest = true
-            ACTION_SEND_CLIPBOARD -> clipRequest = true
             Intent.ACTION_SEND -> {
                 @Suppress("DEPRECATION")
                 val u = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
@@ -199,12 +197,6 @@ class AppState(val ctx: Context) {
         } catch (e: Exception) { TransferLog.failed(id, e.message ?: "Failed") }
     }
 
-    fun sendClipboard(scope: kotlinx.coroutines.CoroutineScope) {
-        val cm = ctx.getSystemService(ClipboardManager::class.java)
-        val t = cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString()
-        if (t.isNullOrEmpty()) message = "Clipboard is empty" else scope.launch { sendText(t) }
-    }
-
     suspend fun download(f: MacFile) {
         val c = client() ?: return
         val id = TransferLog.start(f.name, incoming = true, status = "Saving…")
@@ -239,7 +231,7 @@ fun PortalScreen(s: AppState) {
     val connected = s.macName != null
 
     // keep the Mac's list fresh while the app is open
-    LaunchedEffect(s.key, s.finder.macs.size, s.manualHost) {
+    LaunchedEffect(s.key, s.finder.macs.size, s.manualHost, UsbLink.state.value) {
         while (true) { s.refresh(); delay(5_000) }
     }
     // pairing link opened from the phone camera
@@ -305,7 +297,7 @@ fun Header(s: AppState) {
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(if (connected) "Connected" else if (s.key == null) "Rokaconnect" else "Waiting", color = Palette.muted, fontSize = 12.sp)
+                    Text(if (connected && UsbLink.state.value) "Connected by cable · fastest" else if (connected) "Connected" else if (s.key == null) "Rokaconnect" else "Waiting", color = Palette.muted, fontSize = 12.sp)
                     Text(text, color = Palette.ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 LevelBars(active = connected)

@@ -2,7 +2,7 @@ import Foundation
 import AppKit
 import SwiftUI
 
-/// Portal hub: one place for everything sent or received over Android sharing, the iPhone Portal app and the browser page.
+/// Portal hub: one place for everything sent or received with the Rokaconnect phone app and Android Quick Share.
 final class TransferHub: ObservableObject {
     static let shared = TransferHub()
 
@@ -83,13 +83,6 @@ final class TransferHub: ObservableObject {
     /// Clipboard text waiting to be delivered to the next phone that checks in (Mac → phone).
     private var pendingClip: (text: String, at: Date)?
 
-    /// Menu bar → "Send Clipboard to Phone": the phone app picks it up within a few seconds.
-    func sendClipboardToPhone() {
-        guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else { return }
-        pendingClip = (text, Date())
-        let id = begin(.outgoing, .android, peer: onlinePhones.first?.name ?? "Phone", title: "Clipboard", state: .waiting)
-        pendingClipRecord = id
-    }
     private var pendingClipRecord: UUID?
 
     /// Hands the waiting clipboard to the phone that just checked in (once; expires after 2 minutes).
@@ -158,7 +151,7 @@ final class TransferHub: ObservableObject {
         landing.land(file: first, style: PortalReceiver.landingStyle(""), label: first?.lastPathComponent ?? t.title, from: t.peer)
     }
 
-    /// Records a transfer that already completed (e.g. from the iPhone Portal app).
+    /// Records a transfer that already completed.
     func recordReceived(_ channel: Channel, peer: String, title: String, file: URL?) {
         let id = begin(.incoming, channel, peer: peer, title: title)
         update(id) { $0.state = .done; $0.progress = 1; if let file { $0.files = [file] } }

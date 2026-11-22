@@ -67,8 +67,15 @@ final class EQManager: ObservableObject {
     private var boundOutput: String?
     private let ioQueue = DispatchQueue(label: "rokaconnect.eq.io", qos: .userInteractive)
 
+    /// Video players are never picked for the EQ automatically, only when you choose one yourself in Settings.
+    static let videoPlayers: Set<String> = ["com.lok.mediaplayer", "com.apple.QuickTimePlayerX", "com.apple.TV",
+                                            "org.videolan.vlc", "com.colliderli.iina", "io.mpv"]
+
     init() {
-        bundleID = UserDefaults.standard.string(forKey: "eqApp") ?? "com.spotify.client"
+        // keep the saved app, unless it is a video player that you didn't pick yourself
+        let saved = UserDefaults.standard.string(forKey: "eqApp")
+        let chosen = UserDefaults.standard.bool(forKey: "eqAppChosen")
+        bundleID = saved.flatMap { Self.videoPlayers.contains($0) && !chosen ? nil : $0 } ?? "com.spotify.client"
         refreshApps(); loadGains()
         if UserDefaults.standard.bool(forKey: "eqEnabled") { setEnabled(true) }
     }
@@ -89,6 +96,9 @@ final class EQManager: ObservableObject {
         apps = list.sorted { $0.1.lowercased() < $1.1.lowercased() }.map { (id: $0.0, name: $0.1) }
     }
 
+    /// Settings → Media: you picked this app yourself (so it's kept, even if it's a video player).
+    func choose(_ id: String) { UserDefaults.standard.set(true, forKey: "eqAppChosen"); bundleID = id }
+
     func setGain(_ band: Int, _ v: Float) { gains[band] = v; applyGains() }
     func applyPreset(_ g: [Float]) { gains = g; applyGains() }
 
@@ -108,17 +118,42 @@ final class EQManager: ObservableObject {
         retry?.invalidate(); retry = nil
         stop()
         guard on else { status = ""; return }
-        _ = start()
-        // keep it attached: start when the app begins playing, re-attach when it relaunches or the output changes
-        retry = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            guard let self, self.enabled else { return }
-            if self.tapID == kAudioObjectUnknown { _ = self.start(); return }
-            let procs = self.processObjects(matching: self.bundleID).sorted()
-            if procs != self.boundProcs || self.defaultOutputUID() != self.boundOutput {
-                eqLog.notice("re-attaching (app or output changed)")
-                self.stop(); _ = self.start()
-            }
+        silentSince = nil
+        tick()
+        // every 2 s: tap only while the app is really playing sound (macOS shows the purple dot while a tap exists),
+        // let go after ~3 s of silence, and re-attach when the app relaunches or the output changes
+        retry = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.tick() }
+    }
+
+    /// When the app went quiet (nil while it plays).
+    private var silentSince: Date?
+
+    private func tick() {
+        guard enabled else { return }
+        let procs = processObjects(matching: bundleID).sorted()
+        let playing = procs.contains { isPlaying($0) }
+        if playing { silentSince = nil } else if silentSince == nil { silentSince = Date() }
+        let name = apps.first { $0.id == bundleID }?.name ?? bundleID
+        if tapID == kAudioObjectUnknown {
+            if playing { _ = start() } else { setStatus("Ready — the EQ starts when \(name) plays sound.") }
+            return
         }
+        if let quiet = silentSince, Date().timeIntervalSince(quiet) >= 3 {
+            eqLog.notice("app is silent, releasing the tap")
+            stop(); setStatus("Ready — the EQ starts when \(name) plays sound.")
+            return
+        }
+        if procs != boundProcs || defaultOutputUID() != boundOutput {
+            eqLog.notice("re-attaching (app or output changed)")
+            stop(); if playing { _ = start() }
+        }
+    }
+
+    /// Core Audio says this process is sending sound to an output right now.
+    private func isPlaying(_ id: AudioObjectID) -> Bool {
+        var a = prop(kAudioProcessPropertyIsRunningOutput)
+        var v: UInt32 = 0; var sz = UInt32(MemoryLayout<UInt32>.size)
+        return AudioObjectGetPropertyData(id, &a, 0, nil, &sz, &v) == noErr && v != 0
     }
     private func restartIfNeeded() { if enabled { setEnabled(true) } }
 

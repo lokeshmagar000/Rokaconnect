@@ -2,7 +2,7 @@ import Foundation
 import CryptoKit
 import Network
 
-/// Portal wire protocol (shared by the Mac app, the iPhone app and the test client).
+/// Portal wire protocol (shared by the Mac app, the Android app and the test client).
 /// One connection per transfer. Every frame is: 4-byte big-endian length + AES-256-GCM sealed box.
 /// The key is derived from a pairing code shown on the Mac, so only a paired phone can send.
 struct PortalHeader: Codable {

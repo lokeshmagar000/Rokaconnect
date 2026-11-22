@@ -30,7 +30,7 @@ final class PortalReceiver: ObservableObject {
             l.stateUpdateHandler = { [weak self] s in
                 DispatchQueue.main.async {
                     switch s {
-                    case .ready: self?.status = "Ready — waiting for your iPhone"
+                    case .ready: self?.status = "Ready — waiting for your phone"
                     case .failed(let e): self?.status = "Portal unavailable: \(e.localizedDescription)"
                     default: break
                     }
@@ -486,8 +486,8 @@ struct PortalSection: View {
         var c = URLComponents(); c.scheme = "rokaconnect"; c.host = "pair"
         c.queryItems = [URLQueryItem(name: "c", value: code), URLQueryItem(name: "p", value: String(Portal.port)),
                         URLQueryItem(name: "n", value: Host.current().localizedName ?? "Mac")]
-        if let ip = WebShare.lanIPv4() { c.queryItems?.append(URLQueryItem(name: "h", value: ip)) }
-        return c.url.flatMap { WebShare.qrImage($0.absoluteString) }
+        if let ip = Pairing.lanIPv4() { c.queryItems?.append(URLQueryItem(name: "h", value: ip)) }
+        return c.url.flatMap { Pairing.qrImage($0.absoluteString) }
     }
 
     static let effects: [(id: String, name: String, sub: String, icon: String, colors: [Color])] = [
@@ -498,8 +498,9 @@ struct PortalSection: View {
         ("classic", "Classic", "A simple glide", "arrow.right", [Color(red: 0.4, green: 0.6, blue: 1), Color(red: 0.6, green: 0.4, blue: 1)]),
     ]
     var body: some View {
+        USBSection()
         ShareHubSection()
-        SectionLabel("iPhone — Portal app")
+        SectionLabel("Pair your phone")
         Card {
             HStack(alignment: .top, spacing: 14) {
                 if let qr = Self.pairingQR(p.code) {

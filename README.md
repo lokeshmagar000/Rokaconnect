@@ -24,6 +24,8 @@
 - **Now Playing.** Artwork, scrolling title, synced lyrics, seek bar and controls for whatever is playing on the Mac.
 - **Send by drag and drop.** Drag files onto the notch, then tap your phone.
 - **Portal arrival.** Files from your phone come out of a portal under the notch.
+- **USB cable mode.** Plug in your Android phone and transfers go through the cable automatically.
+  It is about 2× faster than Wi-Fi even on a USB 2.0 cable, and faster still on a USB 3 cable.
 - **Clipboard sync.** Copy on the Mac, paste on the phone, and the other way round.
 - **Quick Share compatible.** Android phones can send to the Mac with the built-in Share → Quick Share.
 - **Extras.** Per-app equalizer, battery and AirPods alerts, weather, an unlock animation, Touch ID lock for Settings.
@@ -34,6 +36,7 @@
 - **Phone island.** A small island around the camera hole that shows music and transfers over any app.
   It finds the camera position by itself, with optional fine-tuning.
 - **Clipboard sync** both ways, and a live speed readout while transferring.
+- **Uses the USB cable by itself** when the phone is plugged into the Mac (USB debugging on).
 
 <p align="center">
   <img src="docs/mac-portal-arrival.png" width="640" alt="Portal animation on the Mac">
@@ -87,11 +90,30 @@ Sources/Rokaconnect/   Mac app (SwiftUI)
   Island.swift           the notch island
   PortalReceiver.swift   receiving files from the phone + arrival animation
   PortalProtocol.swift   the encrypted Portal wire protocol
-  Share/                 drag and drop, Quick Share, browser sharing
+  Share/                 drag and drop, Quick Share, USB cable mode
 android/               Android app (Kotlin, Jetpack Compose)
 tools/                 small helper scripts (icon generation, test client)
 docs/                  screenshots
 ```
+
+## USB cable mode (fastest)
+
+1. On the phone: **Settings → About phone → Software information**, tap **Build number** 7 times,
+   then turn on **Developer options → USB debugging**.
+2. Install Google's free [platform-tools](https://developer.android.com/tools/releases/platform-tools) (`adb`) on the Mac.
+   Rokaconnect finds it in `~/Library/Android/sdk/platform-tools`, Homebrew, or your Downloads folder.
+3. Plug the phone into the Mac and tap **Allow** on the phone.
+
+Rokaconnect runs `adb reverse` so the phone reaches the Mac through the cable, using the same encrypted protocol.
+Measured on a Galaxy S24 Ultra with the USB 2.0 cable that comes in the box (300 MB file):
+
+| | Speed |
+|---|---|
+| Wi-Fi | 15.5 MB/s |
+| USB cable, phone → Mac | 34.6 MB/s |
+| USB cable, Mac → phone | 33.4 MB/s |
+
+That cable is the limit (USB 2.0, 480 Mb/s). A USB 3 data cable lets the phone's USB 3.2 port go much faster.
 
 ## Good to know
 
