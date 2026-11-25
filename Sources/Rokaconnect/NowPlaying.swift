@@ -7,6 +7,8 @@ struct Track: Equatable {
     var artwork: Data?
     var position = 0.0, duration = 0.0
     var stamp = Date()
+    /// MediaRemote modes as the player reports them (shuffle: 1 off, 2 albums, 3 songs · repeat: 1 off, 2 one, 3 all; 0 unknown).
+    var shuffle = 0, repeatMode = 0
 }
 
 final class NowPlaying: ObservableObject {
@@ -114,6 +116,8 @@ final class NowPlaying: ObservableObject {
         t.position = t.duration > 0 ? min(t.duration, elapsed + since) : elapsed + since
         t.stamp = Date()
         if let b64 = state["artworkData"] as? String { t.artwork = Data(base64Encoded: b64) }
+        t.shuffle = (state["shuffleMode"] as? NSNumber)?.intValue ?? 0
+        t.repeatMode = (state["repeatMode"] as? NSNumber)?.intValue ?? 0
         return t
     }
 
@@ -204,8 +208,9 @@ final class NowPlaying: ObservableObject {
 
     func send(_ cmd: String) {
         if usingAdapter, let paths = Self.adapterPaths {
-            // MediaRemote command ids: 2 toggle play/pause, 4 next, 5 previous
-            let id = cmd == "playpause" ? "2" : cmd == "next track" ? "4" : cmd == "previous track" ? "5" : nil
+            // MediaRemote command ids: 2 toggle play/pause, 4 next, 5 previous, 6 toggle shuffle, 7 toggle repeat
+            let ids = ["playpause": "2", "next track": "4", "previous track": "5", "shuffle": "6", "repeat": "7"]
+            let id = ids[cmd]
             guard let id else { return }
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/usr/bin/perl")

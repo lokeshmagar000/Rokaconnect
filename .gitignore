@@ -20,3 +20,7 @@ android/.idea/
 *.apk
 *.keystore
 *.jks
+
+# release signing key + its password (back these up privately; never commit)
+android/keystore/
+android/keystore.properties

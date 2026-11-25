@@ -60,6 +60,9 @@ final class USBLink: ObservableObject {
             }
             // make sure every plugged-in phone has the cable link (set it up again if something removed it,
             // e.g. adb was restarted by another tool)
+            // adb's cable link is the fastest when USB debugging is on (the accessory link without debugging is
+            // limited by Android's accessory driver), so it keeps the port; the phone's accessory link takes over
+            // by itself whenever adb isn't there
             for p in ready {
                 let links = Self.run(adb, ["-s", p.id, "reverse", "--list"]) ?? ""
                 if links.contains("tcp:\(Portal.port)") { self.linked.insert(p.id); continue }
@@ -90,12 +93,14 @@ final class USBLink: ObservableObject {
 /// Settings → Portal: the USB cable card.
 struct USBSection: View {
     @ObservedObject var usb = USBLink.shared
+    @ObservedObject var aoa = AOALink.shared
+    var connected: Bool { aoa.connected || !usb.phones.isEmpty }
     var body: some View {
         SectionLabel("USB cable — fastest")
         Card {
             HStack(spacing: 12) {
                 ZStack {
-                    Circle().fill(usb.phones.isEmpty ? Brand.raised : Brand.cream)
+                    Circle().fill(connected ? Brand.cream : Brand.raised)
                     Image(systemName: "cable.connector").font(.system(size: 15, weight: .semibold)).foregroundStyle(Brand.coral)
                 }
                 .frame(width: 36, height: 36)
@@ -104,25 +109,18 @@ struct USBSection: View {
                     Text(subtitle).font(.system(size: 11)).foregroundStyle(Brand.ink.opacity(0.6)).fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
-                if usb.adbPath == nil {
-                    GlassPill(title: "Get adb", icon: "arrow.down.circle") {
-                        NSWorkspace.shared.open(URL(string: "https://developer.android.com/tools/releases/platform-tools")!)
-                    }
-                }
+                if connected { Circle().fill(Color.green).frame(width: 8, height: 8) }
             }
         }
-        Caption("With a USB-C cable, files move many times faster than Wi-Fi. On the phone: Settings → About phone → Software information → tap Build number 7 times, then Developer options → USB debugging. Plug in and tap Allow.")
+        Caption("Plug your Android phone into this Mac with a USB-C cable. The first time, the phone asks to open Rokaconnect — tick Always and tap OK. No USB debugging needed. (If USB debugging is on and adb is installed, that works too.)")
     }
     var title: String {
+        if aoa.connected { return "Connected by USB cable" }
         if let p = usb.phones.first { return "Connected by USB: \(p.model)" }
-        if usb.waitingForApproval { return "Tap Allow on your phone" }
-        if usb.adbPath == nil { return "Needs Android platform-tools (adb)" }
         return "Plug in your phone with a USB cable"
     }
     var subtitle: String {
-        if !usb.phones.isEmpty { return "Sending, receiving and clipboard now go through the cable." }
-        if usb.waitingForApproval { return "The phone is asking to allow USB debugging for this Mac." }
-        if usb.adbPath == nil { return "A free tool from Google. Download it, unzip it into your Downloads folder, then plug in your phone." }
-        return "USB debugging must be on. Rokaconnect switches to the cable by itself."
+        if connected { return "Sending, receiving and clipboard now go through the cable." }
+        return "Rokaconnect switches to the cable by itself — much faster than Wi-Fi."
     }
 }

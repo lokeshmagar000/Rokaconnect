@@ -28,6 +28,9 @@
   It is about 2× faster than Wi-Fi even on a USB 2.0 cable, and faster still on a USB 3 cable.
 - **Clipboard sync.** Copy on the Mac, paste on the phone, and the other way round.
 - **Quick Share compatible.** Android phones can send to the Mac with the built-in Share → Quick Share.
+- **Devices widget.** Battery rings for the Mac, your phone and your earbuds, Galaxy Buds noise control
+  (Off · Noise cancelling · Ambient), and Lock Mac, Ring phone, Send files and Keep awake.
+- **Music player.** Artwork across the island, seek bar, shuffle, repeat and where the sound is playing.
 - **Extras.** Per-app equalizer, battery and AirPods alerts, weather, an unlock animation, Touch ID lock for Settings.
 
 ### Android app
@@ -36,6 +39,7 @@
 - **Phone island.** A small island around the camera hole that shows music and transfers over any app.
   It finds the camera position by itself, with optional fine-tuning.
 - **Clipboard sync** both ways, and a live speed readout while transferring.
+- **Same island design as the Mac:** Music and Devices pages, Galaxy Buds noise control, and Lock Mac / Keep Mac awake.
 - **Uses the USB cable by itself** when the phone is plugged into the Mac (USB debugging on).
 
 <p align="center">
@@ -45,7 +49,9 @@
 ## Privacy
 
 - Everything stays on your local network. There is no server and no account.
-- Pairing uses a code from the Mac (scan the QR code). Every transfer is encrypted with AES-256-GCM using a key derived from that code.
+- Pairing uses a code from the Mac (scan the QR code). Every transfer is encrypted with AES-256-GCM using a key derived from that code, and each message is accepted only once.
+- Quick Share asks before accepting anything from a nearby device, never opens received links by itself, and marks received files so Gatekeeper checks them.
+- Pairing links ask before replacing a pairing, and passwords copied from password managers are never synced.
 - The Android app reads notifications **only** to show the music that is playing. It never reads or sends your notifications.
 
 ## Requirements
@@ -98,20 +104,18 @@ docs/                  screenshots
 
 ## USB cable mode (fastest)
 
-1. On the phone: **Settings → About phone → Software information**, tap **Build number** 7 times,
-   then turn on **Developer options → USB debugging**.
-2. Install Google's free [platform-tools](https://developer.android.com/tools/releases/platform-tools) (`adb`) on the Mac.
-   Rokaconnect finds it in `~/Library/Android/sdk/platform-tools`, Homebrew, or your Downloads folder.
-3. Plug the phone into the Mac and tap **Allow** on the phone.
+Plug the phone into the Mac. The first time, the phone asks to open Rokaconnect for the USB accessory:
+tick **Always** and tap **OK**. **No USB debugging needed** — the Mac uses Google's Android Open Accessory mode.
 
-Rokaconnect runs `adb reverse` so the phone reaches the Mac through the cable, using the same encrypted protocol.
+If USB debugging is on and Google's [platform-tools](https://developer.android.com/tools/releases/platform-tools) (`adb`)
+are installed, Rokaconnect uses `adb reverse` instead, which is faster. Either way it is the same encrypted protocol.
 Measured on a Galaxy S24 Ultra with the USB 2.0 cable that comes in the box (300 MB file):
 
 | | Speed |
 |---|---|
 | Wi-Fi | 15.5 MB/s |
 | USB cable, phone → Mac | 34.6 MB/s |
-| USB cable, Mac → phone | 33.4 MB/s |
+| USB cable, Mac → phone | 33.4 MB/s (adb) · 22.9 MB/s (no USB debugging) |
 
 That cable is the limit (USB 2.0, 480 Mb/s). A USB 3 data cable lets the phone's USB 3.2 port go much faster.
 

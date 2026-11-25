@@ -146,7 +146,8 @@ private fun PortalArrival(f: Fly) {
     var box by remember { mutableStateOf(IntSize.Zero) }
     LaunchedEffect(f.id) {
         t.animateTo(0.62f, tween((1800 * 0.62f).toInt(), easing = LinearEasing))
-        view.performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM)      // a soft tap as it lands
+        // a soft tap as it lands (CONFIRM exists from Android 11; older phones get a plain tap)
+        view.performHapticFeedback(if (android.os.Build.VERSION.SDK_INT >= 30) android.view.HapticFeedbackConstants.CONFIRM else android.view.HapticFeedbackConstants.VIRTUAL_KEY)
         t.animateTo(1f, tween((1800 * 0.38f).toInt(), easing = LinearEasing))
         if (TransferLog.fly.value?.id == f.id) TransferLog.fly.value = null
     }
@@ -281,6 +282,8 @@ fun SetupCard() {
     @Suppress("UNUSED_EXPRESSION") tick
     val pm = ctx.getSystemService(android.os.PowerManager::class.java)
     fun go(i: Intent) = runCatching { ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+    // Android's own permission popup for "Nearby devices" (Galaxy Buds battery + noise control)
+    val nearby = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { tick++; BudsLink.start(ctx) }
     data class Step(val title: String, val why: String, val done: Boolean, val open: () -> Unit)
     val steps = listOf(
         Step("Music on the island", "Notification access — only to read what's playing", PhoneMedia.allowed(ctx)) {
@@ -291,6 +294,9 @@ fun SetupCard() {
         },
         Step("Accessibility", "Tap the island, send what you Copy", IslandAccessibility.running) {
             go(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        },
+        Step("Earbuds controls", "Nearby devices — battery and noise control for Galaxy Buds", BudsLink.hasPermission(ctx)) {
+            if (android.os.Build.VERSION.SDK_INT >= 31) nearby.launch(android.Manifest.permission.BLUETOOTH_CONNECT)
         },
         Step("No battery limits", "Keeps Rokaconnect running in the background", pm.isIgnoringBatteryOptimizations(ctx.packageName)) {
             @android.annotation.SuppressLint("BatteryLife")
@@ -314,5 +320,27 @@ fun SetupCard() {
             }
         }
         Text("Switch greyed out? Settings → Apps → Rokaconnect → ⋮ → Allow restricted settings.", color = Palette.faint, fontSize = 12.sp)
+    }
+}
+
+
+/** "USB cable — fastest": shows whether the cable is being used, and how to use it (no USB debugging needed). */
+@Composable
+fun UsbSection() {
+    val cable = UsbLink.state.value || AoaLink.state.value
+    Section(label = "USB cable — fastest") {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Badge(RIcons.cable, 48.dp, cream = cable, tint = if (cable) Palette.coral else Palette.muted)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(if (cable) "Using the USB cable" else "Plug into your Mac", color = Palette.ink, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                Text(
+                    if (cable) "Sending, receiving and clipboard go through the cable — about 2× faster than Wi-Fi, more with a USB 3 cable."
+                    else "Connect a USB-C cable to the Mac running Rokaconnect. When the phone asks to open Rokaconnect, tick Always and tap OK. No USB debugging needed.",
+                    color = Palette.muted, fontSize = 13.sp,
+                )
+            }
+            if (cable) Box(Modifier.size(10.dp).clip(RoundedCornerShape(50)).background(Palette.good))
+        }
     }
 }

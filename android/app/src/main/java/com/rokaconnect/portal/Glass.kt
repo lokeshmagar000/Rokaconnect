@@ -296,5 +296,10 @@ object RIcons {
     val sliders = icon("sliders", "M4 7h10", "M18 7h2", "M16 5v4", "M4 17h4", "M12 17h8", "M10 15v4")
     val shield = icon("shield", "M12 3l8 3v6c0 4.5-3.4 8-8 9c-4.6-1-8-4.5-8-9V6z", "M8.5 12l2.5 2.5L15.5 10")
     val heart = icon("heart", "M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z")
+    val cable = icon("cable", "M9 2v4", "M15 2v4", "M7 6h10v4a5 5 0 0 1-10 0z", "M12 15v7")
+    val phone = icon("phone", "M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z", "M11 18h2")
+    val buds = icon("buds", "M7 4a3 3 0 0 0-3 3v3a3 3 0 0 0 6 0V7a3 3 0 0 0-3-3z", "M7 13v6", "M17 4a3 3 0 0 1 3 3v3a3 3 0 0 1-6 0V7a3 3 0 0 1 3-3z", "M17 13v6")
+    val lock = icon("lock", "M7 11V8a5 5 0 0 1 10 0v3", "M6 11h12v10H6z")
+    val sun = icon("sun", "M8 12a4 4 0 1 0 8 0a4 4 0 1 0-8 0", "M12 2v2", "M12 20v2", "M2 12h2", "M20 12h2", "M4.9 4.9l1.4 1.4", "M17.7 17.7l1.4 1.4", "M4.9 19.1l1.4-1.4", "M17.7 6.3l1.4-1.4")
     val eye = icon("eye", "M2 12s3.6-7 10-7s10 7 10 7s-3.6 7-10 7S2 12 2 12z", "M9 12a3 3 0 1 0 6 0a3 3 0 1 0-6 0")
 }

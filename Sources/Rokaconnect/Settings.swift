@@ -59,7 +59,7 @@ final class Settings: ObservableObject {
         outputChange = b("outputChange", true)
         overlayDuration = d.object(forKey: "overlayDuration") as? Double ?? 4
         portalEffects = b("portalEffects", true); portalStyle = d.string(forKey: "portalStyle2") ?? "portal"   // new key: everyone starts on the portal
-        androidShare = b("androidShare", true); autoAcceptShares = b("autoAcceptShares", true); autoClipboard = b("autoClipboard", true)
+        androidShare = b("androidShare", true); autoAcceptShares = b("autoAcceptShares", false); autoClipboard = b("autoClipboard", true)   // Quick Share asks before accepting (security)
         weatherOn = b("weatherOn", true); fahrenheit = b("fahrenheit", false); podsAlerts = b("podsAlerts", true)
     }
 

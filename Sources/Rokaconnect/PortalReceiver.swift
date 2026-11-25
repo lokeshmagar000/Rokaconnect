@@ -4,6 +4,10 @@ import AppKit
 import AVFoundation
 import SwiftUI
 import CryptoKit
+import os
+
+/// Transfer speed log (Console.app → "Rokaconnect" → category Transfer), e.g. "sent x.mov 300 MB in 9.1 s = 33 MB/s".
+let transferLog = Logger(subsystem: "com.rokaconnect.app", category: "Transfer")
 
 final class PortalReceiver: ObservableObject {
     @Published var status = "Starting…"
@@ -46,16 +50,39 @@ final class PortalReceiver: ObservableObject {
         code = c; key = Portal.key(for: c)
     }
 
+    /// Open connections right now (a cap keeps a flood of unauthenticated connections from piling up).
+    private static let gate = NSLock()
+    private static var open = 0
+
     private func handle(_ conn: NWConnection) {
         let key = self.key
+        Self.gate.lock()
+        guard Self.open < 32 else { Self.gate.unlock(); conn.cancel(); return }
+        Self.open += 1
+        Self.gate.unlock()
         Task.detached {
-            defer { conn.cancel() }
+            defer { conn.cancel(); Self.gate.lock(); Self.open -= 1; Self.gate.unlock() }
             do {
                 try await conn.startAndWait()
-                let hdr = try JSONDecoder().decode(PortalHeader.self, from: try await conn.recvFrame(key))
+                // the first frame: must decrypt with our key, be fresh (120 s) and never seen before (no replays)
+                let first = try await conn.recvSealed()
+                let hdr = try JSONDecoder().decode(PortalHeader.self, from: try Portal.open(first, key))
                 guard abs(Date().timeIntervalSince1970 - hdr.ts) < 120 else { throw PortalError.expired }
+                guard ReplayGuard.shared.firstUse(first.prefix(12)) else { throw PortalError.rejected }
                 if hdr.kind == "list" || hdr.kind == "get" { try await Self.serveOutbox(hdr, conn, key); return }
                 if hdr.kind == "clipget" { try await Self.serveClipboard(hdr, conn, key); return }
+                // a command from the phone island's Devices page ("lock", "awake-on", "awake-off")
+                if hdr.kind == "cmd" {
+                    let ok: Bool = await MainActor.run {
+                        switch hdr.name {
+                        case "lock": return MacActions.lock()
+                        case "awake-on": KeepAwake.shared.set(true); return true
+                        case "awake-off": KeepAwake.shared.set(false); return true
+                        default: return false
+                        }
+                    }
+                    try await conn.sendFrame(Data((ok ? "OK" : "NO").utf8), key); return
+                }
                 var text = Data(); var dest: URL?; var writer: FrameWriter?
                 var hid: UUID?
                 if hdr.kind == "file" {
@@ -78,6 +105,7 @@ final class PortalReceiver: ObservableObject {
                         if let hid, p - shown >= 0.01 || got == hdr.size { shown = p; await MainActor.run { TransferHub.shared.progress(hid, p) } }
                     }
                     try writer?.finish()
+                    if let dest { Safety.quarantine(dest, from: hdr.from.isEmpty ? "phone" : hdr.from) }   // Gatekeeper-checked like a download
                 } catch {
                     writer?.cancel()
                     if let dest { try? FileManager.default.removeItem(at: dest) }        // no half files left behind
@@ -96,7 +124,7 @@ final class PortalReceiver: ObservableObject {
         let phone = hdr.from.isEmpty ? "Phone" : hdr.from
         let offered: [(id: Int, url: URL, to: String?)] = await MainActor.run {
             let hub = TransferHub.shared
-            hub.phoneCheckedIn(phone, platform: hdr.platform ?? "ios")
+            hub.phoneCheckedIn(phone, platform: hdr.platform ?? "ios", battery: hdr.battery, charging: hdr.charging)
             return hub.outbox.compactMap { u in
                 guard let id = hub.outboxIDs[u] else { return nil }
                 let to = hub.outboxTargets[u]
@@ -108,6 +136,13 @@ final class PortalReceiver: ObservableObject {
             // a clipboard the Mac sent to the phone (menu bar → Send Clipboard to Phone) rides along
             var reply: [String: Any] = ["mac": Host.current().localizedName ?? "Mac", "files": items]
             if let clip = await MainActor.run(body: { TransferHub.shared.takePendingClip() }) { reply["clip"] = clip }
+            if await MainActor.run(body: { TransferHub.shared.takeRing(phone) }) { reply["ring"] = true }      // "Ring phone"
+            // this Mac's battery and Keep-awake state, for the phone island's Devices page
+            let mac: (Int, Bool, Bool)? = await MainActor.run {
+                guard let p = (NSApp.delegate as? AppDelegate)?.power else { return nil }
+                return (p.level, p.charging, KeepAwake.shared.on)
+            }
+            if let mac { reply["macBattery"] = mac.0; reply["macCharging"] = mac.1; reply["macAwake"] = mac.2 }
             try await conn.sendFrame(try JSONSerialization.data(withJSONObject: reply), key)
             return
         }
@@ -121,6 +156,7 @@ final class PortalReceiver: ObservableObject {
         let channel: TransferHub.Channel = hdr.platform == "android" ? .android : .iphone
         let peer = hdr.from.isEmpty ? channel.rawValue : hdr.from
         let hid = await MainActor.run { TransferHub.shared.begin(.outgoing, channel, peer: peer, title: file.lastPathComponent, file: file) }
+        let started = Date()
         do {
             var shown = 0.0
             try await conn.streamFile(fh, key: key) { sent in
@@ -128,6 +164,8 @@ final class PortalReceiver: ObservableObject {
                 if p - shown >= 0.01 || p >= 1 { shown = p; DispatchQueue.main.async { TransferHub.shared.progress(hid, p) } }
             }
             _ = try? await conn.recvFrame(key)   // phone's "OK"
+            let secs = Date().timeIntervalSince(started), mb = Double(size) / 1_048_576
+            transferLog.notice("sent \(file.lastPathComponent, privacy: .public) \(mb, format: .fixed(precision: 1)) MB in \(secs, format: .fixed(precision: 2)) s = \(mb / max(secs, 0.001), format: .fixed(precision: 1)) MB/s")
             await MainActor.run {
                 TransferHub.shared.update(hid) { $0.state = .done; $0.progress = 1 }
                 if item.to != nil { TransferHub.shared.removeFromOutbox(file) }   // direct sends are delivered once
@@ -141,8 +179,8 @@ final class PortalReceiver: ObservableObject {
     /// Phone asks for the Mac's clipboard (island → "From Mac"): reply with the text.
     private static func serveClipboard(_ hdr: PortalHeader, _ conn: NWConnection, _ key: SymmetricKey) async throws {
         let text: String = await MainActor.run {
-            TransferHub.shared.phoneCheckedIn(hdr.from.isEmpty ? "Phone" : hdr.from, platform: hdr.platform ?? "ios")
-            let t = NSPasteboard.general.string(forType: .string) ?? ""
+            TransferHub.shared.phoneCheckedIn(hdr.from.isEmpty ? "Phone" : hdr.from, platform: hdr.platform ?? "ios", battery: hdr.battery, charging: hdr.charging)
+            let t = Safety.clipboardIsPrivate() ? "" : (NSPasteboard.general.string(forType: .string) ?? "")   // never hand out passwords
             let id = TransferHub.shared.begin(.outgoing, hdr.platform == "android" ? .android : .iphone, peer: hdr.from.isEmpty ? "Phone" : hdr.from, title: "Clipboard")
             TransferHub.shared.update(id) { $0.state = .done; $0.progress = 1 }
             return t

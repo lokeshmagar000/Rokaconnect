@@ -238,19 +238,24 @@ actor NearbySession {
         if header.int(2) == 2 {   // FILE
             guard let f = files[id] else { return }
             if !body.isEmpty {
-                try f.handle.seek(toOffset: UInt64(chunk.int(2) ?? 0))
+                // never write outside the size the sender announced (no huge sparse files, no overruns)
+                let offset = chunk.int(2) ?? 0
+                guard offset >= 0, offset + Int64(body.count) <= f.size else { throw NearbyShareError.protocolError("data beyond the announced size") }
+                try f.handle.seek(toOffset: UInt64(offset))
                 try f.handle.write(contentsOf: body)
                 received += Int64(body.count)
                 if let hid = hubID { let p = expected > 0 ? Double(received) / Double(expected) : 0; onMain { $0.progress(hid, p) } }
             }
             if last {
                 try? f.handle.close(); files.removeValue(forKey: id)
+                Safety.quarantine(f.url, from: peerName)          // Gatekeeper checks it before anything in it can run
                 savedFiles.append(f.url); pendingPayloads.remove(id)
                 if pendingPayloads.isEmpty { done = true }
             }
             return
         }
         byteBuffers[id, default: Data()].append(body)
+        if (byteBuffers[id]?.count ?? 0) > Safety.maxQuickShareText { throw NearbyShareError.protocolError("text too large") }
         guard last, let data = byteBuffers.removeValue(forKey: id) else { return }
         if let type = textPayloads[id] {
             handleText(data, type: type); pendingPayloads.remove(id)
@@ -264,10 +269,9 @@ actor NearbySession {
     private func handleText(_ d: Data, type: Int64) {
         let s = String(decoding: d, as: UTF8.self)
         DispatchQueue.main.async {
+            // copied for you to paste — links are never opened automatically (a nearby sender could open any page)
             NSPasteboard.general.clearContents(); NSPasteboard.general.setString(s, forType: .string)
-            if type == 2, let u = URL(string: s.trimmingCharacters(in: .whitespacesAndNewlines)), ["http", "https"].contains(u.scheme?.lowercased()) {
-                NSWorkspace.shared.open(u)
-            }
+            _ = type
         }
     }
 
@@ -307,7 +311,14 @@ actor NearbySession {
             DispatchQueue.main.async { c.resume(returning: TransferHub.shared.begin(.incoming, .android, peer: peer, title: title, state: .waiting)) }
         }
         hubID = hid
-        let direct = NearbyShare.autoAccept || (UserDefaults.standard.object(forKey: "autoAcceptShares") as? Bool ?? true)
+        // ask in the island unless the user turned on "Accept without asking" (off by default: anyone nearby could send)
+        let direct = NearbyShare.autoAccept || (UserDefaults.standard.object(forKey: "autoAcceptShares") as? Bool ?? false)
+        // refuse oversized offers outright
+        let offered = fileMeta.reduce(Int64(0)) { $0 + ($1.int(4) ?? 0) }
+        if offered < 0 || offered > Safety.maxQuickShareBytes {
+            try await sendSharing(NearbyFrames.response(accept: false))
+            throw NearbyShareError.protocolError("offer too large")
+        }
         let accept: Bool = direct ? true : await withCheckedContinuation { c in
             DispatchQueue.main.async { TransferHub.shared.askConsent(peer: peer, title: title, pin: pin) { c.resume(returning: $0) } }
         }

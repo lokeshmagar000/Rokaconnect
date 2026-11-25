@@ -34,7 +34,10 @@ final class TransferHub: ObservableObject {
 
     struct AndroidPeer: Identifiable, Hashable { let id: String; let name: String }
     /// A phone running the Rokaconnect app (it checks in every few seconds).
-    struct AppPeer: Identifiable, Hashable { var id: String { name }; let name: String; let platform: String; var lastSeen: Date }
+    struct AppPeer: Identifiable, Hashable {
+        var id: String { name }; let name: String; let platform: String; var lastSeen: Date
+        var battery: Int? = nil; var charging = false          // reported by the phone on each check-in
+    }
 
     @Published private(set) var transfers: [Transfer] = [] {
         didSet {
@@ -74,7 +77,8 @@ final class TransferHub: ObservableObject {
             let pb = NSPasteboard.general
             guard pb.changeCount != self.lastChangeCount else { return }
             self.lastChangeCount = pb.changeCount
-            guard Settings.shared.autoClipboard, let text = pb.string(forType: .string), !text.isEmpty,
+            // passwords and one-time codes from password managers are never sent to the phone
+            guard Settings.shared.autoClipboard, !Safety.clipboardIsPrivate(pb), let text = pb.string(forType: .string), !text.isEmpty,
                   text != self.lastFromPhone, text.utf8.count <= 1_000_000 else { return }
             self.pendingClip = (text, Date())          // no history entry: automatic copies stay quiet
         }
@@ -93,10 +97,20 @@ final class TransferHub: ObservableObject {
         return Date().timeIntervalSince(p.at) < 120 ? p.text : nil
     }
 
-    func phoneCheckedIn(_ name: String, platform: String) {
-        if let i = appPeers.firstIndex(where: { $0.name == name }) { appPeers[i].lastSeen = Date() }
-        else { appPeers.append(AppPeer(name: name, platform: platform, lastSeen: Date())) }
+    func phoneCheckedIn(_ name: String, platform: String, battery: Int? = nil, charging: Bool? = nil) {
+        // lets the USB accessory mode switch plugged-in Android phones (only once a phone with the app is known)
+        if platform == "android", !UserDefaults.standard.bool(forKey: "knowsAndroidPhone") { UserDefaults.standard.set(true, forKey: "knowsAndroidPhone") }
+        if let i = appPeers.firstIndex(where: { $0.name == name }) {
+            appPeers[i].lastSeen = Date()
+            if let battery { appPeers[i].battery = battery; appPeers[i].charging = charging ?? false }
+        } else { appPeers.append(AppPeer(name: name, platform: platform, lastSeen: Date(), battery: battery, charging: charging ?? false)) }
     }
+
+    /// Island → Devices → "Ring phone": the phone rings loudly on its next check-in (a few seconds; instantly-ish by cable).
+    @Published private(set) var ringRequested: Set<String> = []
+    func ring(_ phone: AppPeer) { ringRequested.insert(phone.name) }
+    /// Called when that phone checks in: true once, then the request is cleared.
+    func takeRing(_ phone: String) -> Bool { ringRequested.remove(phone) != nil }
 
     /// Sends straight to a phone running the app: it picks the files up on its next check-in and saves them automatically.
     func sendToPhone(_ urls: [URL], _ phone: AppPeer) { addToOutbox(urls, to: phone.name) }

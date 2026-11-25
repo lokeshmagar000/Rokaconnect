@@ -74,6 +74,8 @@ class IslandModel {
     var transfer by mutableStateOf(IslandState())
     /** Bumped when a transfer starts or finishes → the pill gives a little bounce. */
     var bump by mutableIntStateOf(0)
+    /** Music or Devices, in the open card (Devices whenever nothing is playing). */
+    var page by mutableStateOf(PhonePage.MUSIC)
     var onOpen: (String?) -> Unit = {}
 }
 
@@ -103,12 +105,7 @@ fun hasSplit(live: List<Live>) = live.size >= 2
 
 fun cardHeight(m: IslandModel): Dp {
     val g = m.geo
-    val body = when {
-        m.transfer.active -> 72.dp
-        PhoneMedia.track.value != null -> 158.dp
-        else -> 104.dp
-    }
-    return g.textTop + body * g.k
+    return g.textTop + (pageHeight(m) + 20.dp) * g.k       // page content + top/bottom padding
 }
 
 
@@ -149,9 +146,9 @@ fun IslandUi(m: IslandModel, ctx: Context) {
     val corner by animateDpAsState(if (shape == IslandShapeKind.COMPACT) g.idleH / 2 else 28.dp * g.k, spec(), label = "r")
     val visible = shape != IslandShapeKind.COMPACT || live.isNotEmpty() || g.showIdle
 
-    // the open card closes by itself after 6 s untouched
+    // the open card closes by itself after 8 s untouched
     var touched by remember { mutableLongStateOf(0L) }
-    LaunchedEffect(m.expanded, touched) { if (m.expanded) { delay(6_000); m.expanded = false } }
+    LaunchedEffect(m.expanded, touched) { if (m.expanded) { delay(8_000); m.expanded = false } }
 
     // stretchy bounce when a transfer starts or finishes
     val hop = remember { androidx.compose.animation.core.Animatable(1f) }
@@ -174,6 +171,8 @@ fun IslandUi(m: IslandModel, ctx: Context) {
                     detectTapGestures(
                         onTap = {
                             touched = System.currentTimeMillis()
+                            // ringing from the Mac ("Ring phone")? a tap on the island stops it
+                            if (PhoneRinger.ringing) { PhoneRinger.stop(ctx); return@detectTapGestures }
                             when (shape) {
                                 IslandShapeKind.COMPACT -> { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); m.expanded = true }
                                 IslandShapeKind.OPEN -> Unit
@@ -194,7 +193,7 @@ fun IslandUi(m: IslandModel, ctx: Context) {
             }, label = "content") { s ->
                 when (s) {
                     IslandShapeKind.COMPACT -> Compact(live.firstOrNull(), g)
-                    IslandShapeKind.OPEN -> Card(m, onTouch = { touched = System.currentTimeMillis() })
+                    IslandShapeKind.OPEN -> OpenCard(m, ctx, onTouch = { touched = System.currentTimeMillis() })
                 }
             }
         }
@@ -263,113 +262,5 @@ fun Waveform(playing: Boolean, modifier: Modifier) {
 
 // ── the open card ────────────────────────────────────────────────────────────
 
-@Composable
-private fun Card(m: IslandModel, onTouch: () -> Unit) {
-    val g = m.geo
-    Column(Modifier.fillMaxSize().padding(top = g.textTop + 10.dp * g.k, start = 16.dp * g.k, end = 16.dp * g.k, bottom = 10.dp * g.k),
-        verticalArrangement = Arrangement.spacedBy(10.dp * g.k)) {
-        val t = PhoneMedia.track.value
-        when {
-            m.transfer.active -> TransferRow(m.transfer, g)
-            t != null -> { MusicBlock(t, g, onTouch); Actions(m, g, small = true) }
-            else -> Actions(m, g, small = false)
-        }
-    }
-}
-
-@Composable
-private fun TransferRow(s: IslandState, g: IslandGeo) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        ProgressRing(s, 34.dp * g.k)
-        Column(Modifier.weight(1f).padding(start = 10.dp)) {
-            Text(s.title, color = Color.White, fontSize = (13 * g.k).sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(if (s.incoming) "Receiving from Mac" else "Sending to Mac", color = Color.White.copy(alpha = 0.6f), fontSize = (12 * g.k).sp)
-        }
-        Text("${(s.progress * 100).toInt()}%", color = Color(0xFF66DCFF), fontSize = (13 * g.k).sp, fontWeight = FontWeight.Bold)
-    }
-}
-
-@Composable
-private fun MusicBlock(t: PhoneTrack, g: IslandGeo, onTouch: () -> Unit) {
-    var pos by remember { mutableLongStateOf(t.now()) }
-    LaunchedEffect(t) { while (true) { pos = t.now(); delay(500) } }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        t.art?.let { Image(it.asImageBitmap(), null, Modifier.size(48.dp * g.k).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop) }
-        Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
-            Text(t.title, color = Color.White, fontSize = (13 * g.k).sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(t.artist.ifEmpty { t.app }, color = Color.White.copy(alpha = 0.6f), fontSize = (12 * g.k).sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        MediaIcon(MediaGlyph.PREV, 34.dp * g.k) { onTouch(); PhoneMedia.previous() }
-        Spacer(Modifier.width(6.dp))
-        MediaIcon(if (t.playing) MediaGlyph.PAUSE else MediaGlyph.PLAY, 40.dp * g.k) { onTouch(); PhoneMedia.playPause() }
-        Spacer(Modifier.width(6.dp))
-        MediaIcon(MediaGlyph.NEXT, 34.dp * g.k) { onTouch(); PhoneMedia.next() }
-    }
-    if (t.duration > 0) {
-        Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.2f))) {
-            Box(Modifier.fillMaxWidth((pos.toFloat() / t.duration).coerceIn(0f, 1f)).fillMaxHeight().background(Color.White))
-        }
-    }
-}
-
-/** Three big, obvious buttons. */
-@Composable
-private fun Actions(m: IslandModel, g: IslandGeo, small: Boolean) {
-    // clipboard syncs automatically, so only files and photos need buttons
-    val items = listOf(Triple("📁", "Send files", ACTION_PICK_FILES), Triple("🖼", "Send photos", ACTION_PICK_PHOTOS))
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-        items.forEach { (icon, label, action) ->
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                RoundButton(icon, (if (small) 36.dp else 48.dp) * g.k) { m.expanded = false; m.onOpen(action) }
-                if (!small) Text(label, color = Color.White.copy(alpha = 0.65f), fontSize = (11 * g.k).sp)
-            }
-        }
-    }
-}
-
 enum class MediaGlyph { PLAY, PAUSE, NEXT, PREV }
 
-/** A plain white media symbol drawn with shapes (like the system's own), that dips when pressed. */
-@Composable
-private fun MediaIcon(glyph: MediaGlyph, size: Dp, onClick: () -> Unit) {
-    val haptic = LocalHapticFeedback.current
-    val source = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-    val pressed by source.collectIsPressedAsState()
-    val scale by androidx.compose.animation.core.animateFloatAsState(if (pressed) 0.82f else 1f, spring(dampingRatio = 0.5f, stiffness = 600f), label = "press")
-    Canvas(
-        Modifier.size(size)
-            .graphicsLayer { scaleX = scale; scaleY = scale }
-            .clickable(interactionSource = source, indication = null) { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); onClick() }
-    ) {
-        val w = this.size.width; val h = this.size.height
-        val s = minOf(w, h) * 0.5f                       // glyph size
-        val cx = w / 2; val cy = h / 2
-        fun tri(x0: Float, pointRight: Boolean, tw: Float) {
-            val p = androidx.compose.ui.graphics.Path().apply {
-                if (pointRight) { moveTo(x0, cy - s / 2); lineTo(x0 + tw, cy); lineTo(x0, cy + s / 2) }
-                else { moveTo(x0 + tw, cy - s / 2); lineTo(x0, cy); lineTo(x0 + tw, cy + s / 2) }
-                close()
-            }
-            drawPath(p, Color.White, style = androidx.compose.ui.graphics.drawscope.Fill)
-        }
-        val bar = s * 0.22f
-        when (glyph) {
-            MediaGlyph.PLAY -> tri(cx - s * 0.4f, true, s * 0.9f)
-            MediaGlyph.PAUSE -> {
-                drawRoundRect(Color.White, Offset(cx - s * 0.38f, cy - s / 2), androidx.compose.ui.geometry.Size(bar * 1.3f, s), androidx.compose.ui.geometry.CornerRadius(bar * 0.4f))
-                drawRoundRect(Color.White, Offset(cx + s * 0.38f - bar * 1.3f, cy - s / 2), androidx.compose.ui.geometry.Size(bar * 1.3f, s), androidx.compose.ui.geometry.CornerRadius(bar * 0.4f))
-            }
-            MediaGlyph.NEXT -> { tri(cx - s * 0.55f, true, s * 0.55f); tri(cx - s * 0.05f, true, s * 0.55f); drawRect(Color.White, Offset(cx + s * 0.5f, cy - s / 2), androidx.compose.ui.geometry.Size(bar * 0.7f, s)) }
-            MediaGlyph.PREV -> { drawRect(Color.White, Offset(cx - s * 0.5f - bar * 0.7f, cy - s / 2), androidx.compose.ui.geometry.Size(bar * 0.7f, s)); tri(cx - s * 0.5f, false, s * 0.55f); tri(cx + s * 0.05f - s * 0.05f, false, s * 0.55f) }
-        }
-    }
-}
-
-@Composable
-private fun RoundButton(label: String, size: Dp, onClick: () -> Unit) {
-    val haptic = LocalHapticFeedback.current
-    Box(Modifier.size(size).clip(CircleShape).background(Color.White.copy(alpha = 0.13f))
-        .clickable { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); onClick() }, contentAlignment = Alignment.Center) {
-        Text(label, color = Color.White, fontSize = (size.value * 0.4f).sp, fontWeight = FontWeight.Bold)
-    }
-}

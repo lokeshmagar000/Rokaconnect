@@ -1,7 +1,15 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+
+// Release signing key: android/keystore.properties + android/keystore/ (kept out of git — back them up privately).
+// Without them (e.g. someone building from GitHub) release builds fall back to the development key.
+val signing = Properties().apply {
+    rootProject.file("keystore.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
 }
 
 android {
@@ -11,13 +19,21 @@ android {
         applicationId = "com.rokaconnect.portal"
         minSdk = 29
         targetSdk = 35
-        versionCode = 15
-        versionName = "0.5.0"
+        versionCode = 18
+        versionName = "1.0.0"
+    }
+    signingConfigs {
+        if (signing.getProperty("storeFile") != null) create("release") {
+            storeFile = rootProject.file(signing.getProperty("storeFile"))
+            storePassword = signing.getProperty("storePassword")
+            keyAlias = signing.getProperty("keyAlias")
+            keyPassword = signing.getProperty("keyPassword")
+        }
     }
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {

@@ -81,6 +81,8 @@ final class GalaxyBuds: NSObject, ObservableObject, IOBluetoothRFCOMMChannelDele
             guard body.count == size, size >= 3,
                   Self.crc16(Array(body[0..<(body.count - 2)])) == (UInt16(body[body.count - 1]) << 8 | UInt16(body[body.count - 2])) else { continue }
             if body[0] == 0x61 { status(Array(body[1..<(body.count - 2)])) }
+            // 0x77: the buds report a noise-control change (e.g. you touched and held the earbud)
+            if body[0] == 0x77, body.count > 3 { let m = Int(body[1]); if (0...2).contains(m) { DispatchQueue.main.async { self.noiseMode = m } } }
         }
     }
 

@@ -52,12 +52,19 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        UsbLink.start()     // watch for the USB cable link to the Mac
+        UsbLink.start(this)     // watch for the USB cable link to the Mac
+        AoaLink.startIfAttached(this)   // cable already plugged in as a Rokaconnect accessory (no USB debugging)
+        BudsLink.start(this)            // Galaxy Buds battery + noise control (once "Nearby devices" is allowed)
         // light status/nav icons on the dark glass background
         enableEdgeToEdge(SystemBarStyle.dark(android.graphics.Color.TRANSPARENT), SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         state = AppState(applicationContext)
         state.addShared(intent)
         setContent { PortalScreen(state) }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        PhoneRinger.stop(this)      // opening the app stops "Ring phone"
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -111,7 +118,8 @@ class AppState(val ctx: Context) {
         val u = raw?.let { runCatching { Uri.parse(it) }.getOrNull() } ?: return false
         if (u.scheme != "rokaconnect" || u.host != "pair") return false
         val c = u.getQueryParameter("c") ?: return false
-        qrHost = u.getQueryParameter("h") ?: ""
+        // only remember a Mac address on the local network (a link from the internet can't point the phone elsewhere)
+        qrHost = u.getQueryParameter("h")?.takeIf { isLocalAddress(it) } ?: ""
         qrPort = u.getQueryParameter("p")?.toIntOrNull() ?: Portal.PORT
         prefs.edit().putString("qrHost", qrHost).putInt("qrPort", qrPort).apply()
         pair(c)
@@ -119,6 +127,16 @@ class AppState(val ctx: Context) {
     }
 
     var pendingLink by mutableStateOf<String?>(null)
+    /** A pairing link opened from outside the app (browser, message): asks before replacing the pairing. */
+    var pairAsk by mutableStateOf<String?>(null)
+
+    /** Private (home / office) network addresses and .local names only. */
+    fun isLocalAddress(h: String): Boolean {
+        if (h.endsWith(".local", ignoreCase = true)) return true
+        val p = h.split(".").mapNotNull { it.toIntOrNull() }
+        if (p.size != 4 || p.any { it !in 0..255 }) return false
+        return p[0] == 10 || (p[0] == 172 && p[1] in 16..31) || (p[0] == 192 && p[1] == 168) || (p[0] == 169 && p[1] == 254)
+    }
 
     suspend fun pair(newCode: String) {
         busyPairing = true; message = ""
@@ -235,8 +253,34 @@ fun PortalScreen(s: AppState) {
         while (true) { s.refresh(); delay(5_000) }
     }
     // pairing link opened from the phone camera
-    LaunchedEffect(s.pendingLink) { s.pendingLink?.let { l -> s.pendingLink = null; if (!s.pairFromLink(l)) s.message = "That isn't a Rokaconnect pairing code" } }
-    // things shared into the app from other apps go out as soon as a Mac is reachable
+    // a pairing link opened from a browser or message: never pair silently — ask first (see the dialog below)
+    LaunchedEffect(s.pendingLink) { s.pendingLink?.let { l -> s.pendingLink = null; s.pairAsk = l } }
+    s.pairAsk?.let { link ->
+        val name = runCatching { Uri.parse(link).getQueryParameter("n") }.getOrNull()?.takeIf { it.isNotBlank() } ?: "a Mac"
+        // "Pair" only works after a short moment (like Android's own install/permission prompts), so an app that
+        // presses buttons automatically — or a quick accidental tap — can't confirm it
+        var ready by remember(link) { mutableStateOf(false) }
+        LaunchedEffect(link) { delay(1_500); ready = true }
+        val view = androidx.compose.ui.platform.LocalView.current
+        AlertDialog(
+            onDismissRequest = { s.pairAsk = null },
+            title = { Text("Pair with $name?") },
+            text = {
+                // ignore taps while another app's window covers this prompt (overlay tricks)
+                DisposableEffect(Unit) { view.rootView.filterTouchesWhenObscured = true; onDispose { } }
+                Text((if (s.key != null) "This replaces your current pairing. " else "") +
+                    "Only continue if you just scanned the code shown in Rokaconnect on your own Mac.")
+            },
+            confirmButton = {
+                TextButton(enabled = ready, onClick = {
+                    if (!ready) return@TextButton
+                    s.pairAsk = null
+                    scope.launch { if (!s.pairFromLink(link)) s.message = "That isn't a Rokaconnect pairing code" }
+                }) { Text("Pair") }
+            },
+            dismissButton = { TextButton(onClick = { s.pairAsk = null }) { Text("Cancel") } },
+        )
+    }    // things shared into the app from other apps go out as soon as a Mac is reachable
     LaunchedEffect(connected, s.pendingShares.size, s.pendingText) {
         if (connected && s.pendingShares.isNotEmpty()) { val list = s.pendingShares.toList(); s.pendingShares.clear(); s.send(list) }
         if (connected) s.pendingText?.let { t -> s.pendingText = null; s.sendText(t) }
@@ -259,6 +303,7 @@ fun PortalScreen(s: AppState) {
                     color = if (connected) Palette.muted else Palette.warn, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 6.dp),
                 )
                 ActivitySection(s)
+                UsbSection()
                 if (s.macFiles.isNotEmpty()) MacFilesSection(s)
                 SyncSection(s)
                 SetupCard()

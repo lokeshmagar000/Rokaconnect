@@ -157,6 +157,11 @@ class PortalClient(private val ctx: Context, private val host: String, private v
         put("kind", kind); put("name", name); put("size", size)
         put("transition", "classic"); put("ts", System.currentTimeMillis() / 1000.0)
         put("from", Portal.deviceName(ctx)); put("platform", "android")
+        // battery for the Mac island's Devices widget
+        ctx.getSystemService(android.os.BatteryManager::class.java)?.let { bm ->
+            val pct = bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            if (pct in 0..100) { put("battery", pct); put("charging", bm.isCharging) }
+        }
     }.toString().toByteArray(Charsets.UTF_8)
 
     private fun expectOk(conn: PortalConnection) {
@@ -174,7 +179,17 @@ class PortalClient(private val ctx: Context, private val host: String, private v
         }
         // a clipboard the Mac sent to this phone (menu bar → Send Clipboard to Phone)
         j.optString("clip").takeIf { it.isNotEmpty() && Link.autoClip(ctx) }?.let { ClipSync.applyFromMac(ctx, it, quiet = true) }
+        // the Mac's island asked to ring this phone ("Ring phone")
+        if (j.optBoolean("ring", false)) PhoneRinger.start(ctx)
+        // the Mac's battery and Keep-awake state, for the island's Devices page
+        if (j.has("macBattery")) MacState.update(j.optInt("macBattery", -1), j.optBoolean("macCharging"), j.optBoolean("macAwake"), j.optString("mac", "Mac"))
         j.optString("mac", "Mac") to files
+    }
+
+    /** A command for the Mac from the island's Devices page: "lock", "awake-on" or "awake-off". */
+    fun command(name: String): Boolean = PortalConnection(host, port, key).use { conn ->
+        conn.sendFrame(header("cmd", name, 0))
+        String(conn.recvFrame(), Charsets.UTF_8) == "OK"
     }
 
     /** Asks the Mac for its clipboard text. */

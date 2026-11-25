@@ -10,6 +10,8 @@ final class IslandState: ObservableObject {
     @Published var bump = 0
     /// Files are being dragged towards the notch: the open island shows the drop zone.
     @Published var fileDrag = false
+    /// With music playing, the open island shows the player (.music) or the Devices widget.
+    @Published var page: IslandPage = .music
     let notchWidth: CGFloat
     let notchHeight: CGFloat
     init(notchWidth: CGFloat, notchHeight: CGFloat) { self.notchWidth = notchWidth; self.notchHeight = notchHeight }
@@ -19,7 +21,10 @@ enum IslandMetrics {
     static let ear: CGFloat = 6
     static let compactSide: CGFloat = 27
     static func expandedWidth(notch: CGFloat) -> CGFloat { max(333, notch + 180) }
-    static func expandedHeight(hasTrack: Bool, notch: CGFloat) -> CGFloat { hasTrack ? 171 : notch + 50 }
+    /// Open island height: the Devices widget, or the player (both start just below the notch).
+    static func expandedHeight(hasTrack: Bool, devices: Bool, notch: CGFloat, buds: Bool = false) -> CGFloat {
+        devices || !hasTrack ? notch + 236 + (buds ? 50 : 0) : notch + 262      // + the earbuds noise-control row
+    }
 }
 
 // MARK: - Shape
@@ -313,6 +318,7 @@ struct IslandView: View {
     @ObservedObject var airpods: AirPods
     @ObservedObject var weather: Weather
     @ObservedObject var output: OutputWatcher
+    @ObservedObject var buds: GalaxyBuds
     @ObservedObject var settings = Settings.shared
     @ObservedObject var hub = TransferHub.shared
     @State private var dropHover = false
@@ -338,16 +344,22 @@ struct IslandView: View {
         if state.welcome {
             return CGSize(width: IslandMetrics.expandedWidth(notch: state.notchWidth) + 2 * e, height: state.notchHeight + 100)
         }
-        if state.expanded {
-            let w = IslandMetrics.expandedWidth(notch: state.notchWidth) + 2 * e
-            if hub.consent != nil { return CGSize(width: w, height: state.notchHeight + 104) }
-            if !hub.staged.isEmpty { return CGSize(width: w, height: state.notchHeight + 160) }
-            if showDropZone { return CGSize(width: w, height: state.notchHeight + 92) }
-            return CGSize(width: w, height: IslandMetrics.expandedHeight(hasTrack: music.track != nil, notch: state.notchHeight))
-        }
+        if state.expanded { return openSize }
         let extra: CGFloat = live == .none ? 0 : IslandMetrics.compactSide * 2 + (live == .music ? 0 : 60)
         return CGSize(width: state.notchWidth + extra + 2 * e, height: state.notchHeight)
     }
+
+    /// The open island's size (also used to keep its content laid out at full size while it closes).
+    var openSize: CGSize {
+        let w = IslandMetrics.expandedWidth(notch: state.notchWidth) + 2 * IslandMetrics.ear
+        if hub.consent != nil { return CGSize(width: w, height: state.notchHeight + 104) }
+        if !hub.staged.isEmpty { return CGSize(width: w, height: state.notchHeight + 160) }
+        if showDropZone { return CGSize(width: w, height: state.notchHeight + 92) }
+        return CGSize(width: w, height: IslandMetrics.expandedHeight(hasTrack: music.track != nil, devices: showDevicesPage, notch: state.notchHeight, buds: buds.name != nil))
+    }
+
+    /// The open island shows the Devices widget: always when nothing is playing, or when its tab is picked.
+    var showDevicesPage: Bool { music.track == nil || state.page == .devices }
 
     /// Dragging files over the notch (and nothing else needs the space).
     var showDropZone: Bool { (state.fileDrag || dropHover) && hub.staged.isEmpty && hub.consent == nil }
@@ -383,12 +395,23 @@ struct IslandView: View {
             shape.fill(.black).opacity(open ? 0 : 1)
             Group {
                 if state.welcome { WelcomeCard(notch: state.notchHeight).transition(.opacity) }
-                else if state.expanded { expanded.transition(.opacity.animation(.easeOut(duration: 0.2).delay(0.12))) }
-                else { compact.transition(.opacity.animation(.easeOut(duration: 0.12))) }
+                else if state.expanded {
+                    // keep the open layout at its full size while the shape morphs, so nothing squashes;
+                    // it fades in after the island has grown, and out at once when it starts to close
+                    expanded
+                        .frame(width: openSize.width - 2 * IslandMetrics.ear, height: openSize.height, alignment: .top)
+                        .transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.22).delay(0.1)),
+                                                removal: .opacity.animation(.easeIn(duration: 0.08))))
+                }
+                else {
+                    compact.transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.18).delay(0.14)),
+                                                   removal: .opacity.animation(.easeIn(duration: 0.06))))
+                }
             }
             .padding(.horizontal, IslandMetrics.ear)
         }
-        .frame(width: size.width, height: size.height)
+        .frame(width: size.width, height: size.height, alignment: .top)
+        .clipShape(shape)                // nothing is ever drawn outside the island, even mid-animation
         .onDrop(of: [.fileURL], isTargeted: $dropHover) { stageDrop($0) }
         // reaction: squeeze while pressed, spring back on release; bounce when it opens
         .scaleEffect(x: pressed ? 0.95 : (pop ? 1.035 : (hop ? 1.07 : 1)),
@@ -416,6 +439,7 @@ struct IslandView: View {
         .animation(DS.motion(.spring(response: 0.42, dampingFraction: 0.9), reduce: reduceMotion), value: hub.consent?.id)
         .animation(DS.motion(.spring(response: 0.42, dampingFraction: 0.9), reduce: reduceMotion), value: hub.staged.count)
         .animation(DS.motion(.spring(response: 0.38, dampingFraction: 0.78), reduce: reduceMotion), value: showDropZone)
+        .animation(DS.motion(.spring(response: 0.42, dampingFraction: 0.82), reduce: reduceMotion), value: state.page)
         // opening: a gentle bounce · closing: a softer settle
         .animation(DS.motion(state.expanded ? .spring(response: 0.42, dampingFraction: 0.72) : .spring(response: 0.38, dampingFraction: 0.8), reduce: reduceMotion), value: state.expanded)
         .animation(DS.motion(.spring(response: 0.5, dampingFraction: 0.9), reduce: reduceMotion), value: state.welcome)
@@ -473,34 +497,51 @@ struct IslandView: View {
             } else if showDropZone {
                 DropZone(targeted: dropHover).padding(.top, state.notchHeight + 8).padding(.horizontal, 2)
                     .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
-            } else if let t = music.track {
-                PlayerCard(track: t, music: music, lyrics: lyrics, outputIcon: outputIcon, fg: fg)
-                    .padding(.top, 19 - 2)
-                    .frame(maxHeight: .infinity, alignment: .top)
             } else {
-                idle
+                ZStack(alignment: .top) {
+                    // music page: the artwork fills the top of the island edge to edge, fading into black
+                    if !showDevicesPage, let t = music.track {
+                        MusicHero(track: t, height: state.notchHeight + 108)
+                            .padding(.horizontal, -(12 + IslandMetrics.ear))
+                            .transition(.opacity)
+                    }
+                    // the ears beside the notch: Music · Devices tabs while something plays, otherwise date and weather
+                    if music.track != nil { IslandTabs(page: $state.page, notchWidth: state.notchWidth, notchHeight: state.notchHeight) }
+                    else { ears }
+                    Group {
+                        if showDevicesPage {
+                            DevicesCard(power: power, airpods: airpods, galaxy: buds, collapse: { (NSApp.delegate as? AppDelegate)?.collapseIsland() })
+                                .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity), removal: .move(edge: .trailing).combined(with: .opacity)))
+                        } else if let t = music.track {
+                            MusicCard(track: t, music: music, lyrics: lyrics, output: output)
+                                .transition(.asymmetric(insertion: .move(edge: .leading).combined(with: .opacity), removal: .move(edge: .leading).combined(with: .opacity)))
+                        }
+                    }
+                    .padding(.top, state.notchHeight + 8)
+                }
+                .frame(maxHeight: .infinity, alignment: .top)
+                .clipped()
             }
         }
         .padding(.horizontal, 12)
         .padding(.bottom, 10)
     }
 
-    var idle: some View {
-        VStack(spacing: 0) {
-            Color.clear.frame(height: state.notchHeight)
-            TimelineView(.periodic(from: .now, by: 1)) { c in
-                HStack(spacing: 12) {
-                    Text(c.date, format: .dateTime.weekday(.abbreviated).day().month(.abbreviated))
-                        .font(.system(size: 11, weight: .semibold))
-                    Spacer()
-                    if settings.weatherOn, let w = weather.temp { Label(settings.temperature(w), systemImage: weather.symbol) }
-                    Label("\(power.level)%", systemImage: power.charging ? "bolt.fill" : "battery.75percent")
-                    if let d = airpods.device { Label(podsText(d), systemImage: podsIcon) }
+    /// Date on the left of the notch, weather (or the time) on the right — shown when nothing is playing.
+    var ears: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { c in
+            HStack(spacing: 0) {
+                Text(c.date, format: .dateTime.weekday(.abbreviated).day().month(.abbreviated))
+                    .frame(maxWidth: .infinity)
+                Color.clear.frame(width: state.notchWidth)
+                Group {
+                    if settings.weatherOn, let w = weather.temp { Label(settings.temperature(w), systemImage: weather.symbol).labelStyle(TightLabel()) }
+                    else { Text(c.date, format: .dateTime.hour().minute()) }
                 }
-                .font(.system(size: 10.5, weight: .medium))
-                .labelStyle(TightLabel())
+                .frame(maxWidth: .infinity)
             }
-            .frame(maxHeight: .infinity)
+            .font(.system(size: 11, weight: .semibold))
+            .frame(height: state.notchHeight)
         }
     }
 

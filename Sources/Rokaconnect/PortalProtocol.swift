@@ -12,7 +12,9 @@ struct PortalHeader: Codable {
     var transition: String  // classic | plane | rainbow | volcano
     var ts: Double
     var from: String
-    var platform: String? = nil   // "android" from the Android app; nil from the iPhone app
+    var platform: String? = nil   // "android" from the Android app
+    var battery: Int? = nil       // the phone's battery % (sent with every check-in, for the Devices widget)
+    var charging: Bool? = nil
 }
 
 enum PortalError: Error { case closed, badFrame, expired, rejected }

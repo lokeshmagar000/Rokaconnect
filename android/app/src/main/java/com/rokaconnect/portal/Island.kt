@@ -184,7 +184,7 @@ class IslandHost(private val ctx: Context, private val type: Int) {
         val m = dp(8f)
         val expW = minOf(dp(340f) * k, sw - dp(16f))
         val winW = minOf(sw.toFloat(), expW + 2 * m)
-        val maxH = textTop + dp(158f) * k
+        val maxH = textTop + dp(330f) * k          // room for the tallest open card (Devices page with earbuds)
         winX = (cx - winW / 2).coerceIn(0f, sw - winW).toInt()
         winY = maxOf(0f, top - m).toInt()
         val pillTop = top - winY                      // where the pill starts inside the window (no extra push)
@@ -207,7 +207,9 @@ class IslandHost(private val ctx: Context, private val type: Int) {
             (if (touchable) WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH else WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE),
         PixelFormat.TRANSLUCENT).apply {
         gravity = Gravity.TOP or Gravity.START
-        layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+        // draw around the camera cutout (ALWAYS exists from Android 11; Android 10 uses SHORT_EDGES)
+        layoutInDisplayCutoutMode = if (android.os.Build.VERSION.SDK_INT >= 30) WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            else WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
     }
 
     @android.annotation.SuppressLint("ClickableViewAccessibility")
@@ -314,7 +316,8 @@ class IslandService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        UsbLink.start()     // background check-ins use the USB cable when it is plugged in
+        UsbLink.start(this)     // background check-ins use the USB cable when it is plugged in
+        BudsLink.start(this)    // earbuds battery + noise control for the island
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel("island", "Connection", NotificationManager.IMPORTANCE_MIN))
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
@@ -404,8 +407,10 @@ class IslandAccessibility : android.accessibilityservice.AccessibilityService() 
             override fun onWindowFocusChanged(hasFocus: Boolean) {
                 super.onWindowFocusChanged(hasFocus)
                 if (!hasFocus) return
-                val text = getSystemService(android.content.ClipboardManager::class.java)
-                    .primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()
+                val clip = getSystemService(android.content.ClipboardManager::class.java).primaryClip?.takeIf { it.itemCount > 0 }
+                // passwords / codes that apps mark as sensitive are never sent to the Mac
+                val sensitive = clip?.description?.extras?.getBoolean("android.content.extra.IS_SENSITIVE", false) == true
+                val text = if (sensitive) null else clip?.getItemAt(0)?.coerceToText(context)?.toString()
                 text?.let { ClipSync.autoSend(applicationContext, it) }
                 dropReader()
             }

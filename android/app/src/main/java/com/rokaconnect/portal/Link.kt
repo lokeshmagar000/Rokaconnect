@@ -52,6 +52,22 @@ object TransferLog {
     fun flyNow(uri: Uri?, incoming: Boolean) = main.post { fly.value = Fly(System.nanoTime(), uri, incoming) }
 }
 
+/** What the Mac last told us about itself (battery, Keep awake), for the island's Devices page. */
+object MacState {
+    val battery = mutableStateOf(-1)          // -1 = not known yet
+    val charging = mutableStateOf(false)
+    val awake = mutableStateOf(false)
+    val name = mutableStateOf("Mac")
+    private val main = Handler(Looper.getMainLooper())
+    fun update(b: Int, c: Boolean, a: Boolean, n: String) = main.post { battery.value = b; charging.value = c; awake.value = a; name.value = n }
+
+    /** Sends a command to the Mac in the background ("lock", "awake-on", "awake-off"). */
+    fun command(ctx: Context, name: String, done: (Boolean) -> Unit = {}) {
+        val c = Link.client(ctx, emptyList()) ?: run { done(false); return }
+        kotlin.concurrent.thread { val ok = runCatching { c.command(name) }.getOrDefault(false); main.post { done(ok) } }
+    }
+}
+
 /** Pairing + where the Mac is, readable from anywhere (screen or service). */
 object Link {
     private fun prefs(c: Context) = c.getSharedPreferences("portal", Context.MODE_PRIVATE)
@@ -65,8 +81,11 @@ object Link {
         p.getString("host", "")?.trim()?.takeIf { it.isNotEmpty() }?.let { h ->
             val parts = h.split(":"); return parts[0] to (parts.getOrNull(1)?.toIntOrNull() ?: Portal.PORT)
         }
+        // the Mac we already talked to wins over whichever device answers the network search first
+        val last = p.getString("lastHost", "")?.takeIf { it.isNotEmpty() }
+        found.firstOrNull { it.host == last }?.let { return it.host to it.port }
         found.firstOrNull()?.let { return it.host to it.port }
-        p.getString("lastHost", "")?.takeIf { it.isNotEmpty() }?.let { return it to p.getInt("lastPort", Portal.PORT) }
+        last?.let { return it to p.getInt("lastPort", Portal.PORT) }
         return p.getString("qrHost", "")?.takeIf { it.isNotEmpty() }?.let { it to p.getInt("qrPort", Portal.PORT) }
     }
 
@@ -101,14 +120,23 @@ object UsbLink {
     private val main = Handler(Looper.getMainLooper())
     @Volatile private var started = false
 
-    fun start() {
+    fun start(ctx: Context) {
         if (started) return
         started = true
+        val app = ctx.applicationContext
         kotlin.concurrent.thread(isDaemon = true, name = "usb-probe") {
             while (true) {
-                val ok = runCatching {
+                // something listening on 127.0.0.1:52341?
+                val open = AoaLink.active || runCatching {
                     java.net.Socket().use { it.connect(java.net.InetSocketAddress("127.0.0.1", Portal.PORT), 300) }; true
                 }.getOrDefault(false)
+                // our own accessory link is trusted as is; anything else (adb's link — or another app squatting the
+                // port) must first answer a real encrypted check-in with our pairing key before it counts as the Mac
+                val ok = when {
+                    !open -> false
+                    AoaLink.active || active -> true
+                    else -> Link.key(app)?.let { k -> runCatching { PortalClient(app, "127.0.0.1", Portal.PORT, k).list(); true }.getOrDefault(false) } ?: false
+                }
                 if (ok != active) { active = ok; main.post { state.value = ok } }
                 Thread.sleep(2_000)
             }

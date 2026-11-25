@@ -3,6 +3,7 @@ import SwiftUI
 import Combine
 import AVFoundation
 
+
 final class IslandPanel: NSPanel {
     override var canBecomeKey: Bool { false }
 }
@@ -42,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         _ = buds
         portal.start()
         USBLink.shared.start()      // USB cable mode: links plugged-in phones through the cable (needs adb)
+        AOALink.shared.start()      // USB cable mode without USB debugging (Android Open Accessory)
         TransferHub.shared.startClipboardWatch()   // automatic Mac → phone clipboard
         _ = EQManager.shared        // start the equalizer at launch (it used to wait until Settings → Media was opened)
         if Settings.shared.androidShare { NearbyShare.shared.start() }
@@ -98,7 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         panel.ignoresMouseEvents = true          // let clicks reach the menu bar until the island is open
         panel.appearance = NSAppearance(named: .darkAqua)   // keep the glass dark so white text stays readable
-        let host = NSHostingView(rootView: IslandView(state: state, music: music, power: power, lyrics: lyrics, airpods: airpods, weather: weather, output: output))
+        let host = NSHostingView(rootView: IslandView(state: state, music: music, power: power, lyrics: lyrics, airpods: airpods, weather: weather, output: output, buds: buds))
         panel.contentView = host
         reposition()
         panel.orderFrontRegardless()
@@ -204,7 +206,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if s.expanded && islandPinned { collapseWork?.cancel(); collapseWork = nil; return }
         if s.expanded {
             let w = IslandMetrics.expandedWidth(notch: s.notchWidth) + 2 * IslandMetrics.ear + 40
-            let h = IslandMetrics.expandedHeight(hasTrack: music.track != nil, notch: s.notchHeight) + 24
+            let h = IslandMetrics.expandedHeight(hasTrack: music.track != nil, devices: music.track == nil || s.page == .devices, notch: s.notchHeight, buds: buds.name != nil) + 24
             if hit(width: w, height: h) { collapseWork?.cancel(); collapseWork = nil }
             else if collapseWork == nil {
                 let work = DispatchWorkItem { [weak self] in
@@ -250,6 +252,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// The island stays open while it is asking for consent or holding dropped files.
     var islandPinned: Bool { TransferHub.shared.consent != nil || !TransferHub.shared.staged.isEmpty }
+
+    /// Closes the open island right away (used by the Devices widget before locking or picking files).
+    func collapseIsland() {
+        collapseWork?.cancel(); collapseWork = nil
+        island.expanded = false; island.fileDrag = false; panel.ignoresMouseEvents = true; lastToggle = Date()
+    }
 
     func forceOpen() {
         collapseWork?.cancel(); collapseWork = nil
@@ -297,7 +305,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !screenLocked else { return }               // screen changes during lock are redone at unlock
         defer { applyCorners() }
         guard let screen = NSScreen.main else { return }
-        let w: CGFloat = 520, h: CGFloat = 300
+        let w: CGFloat = 520, h: CGFloat = 340       // room for the tallest open island (music player)
         panel.setFrame(NSRect(x: screen.frame.midX - w/2, y: screen.frame.maxY - h, width: w, height: h), display: true)
     }
 
