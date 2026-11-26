@@ -22,7 +22,8 @@ cat > "$APP/Contents/Info.plist" <<P
 <key>CFBundleExecutable</key><string>Rokaconnect</string>
 <key>CFBundleIdentifier</key><string>com.rokaconnect.app</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
-<key>CFBundleShortVersionString</key><string>0.1.0</string>
+<key>CFBundleShortVersionString</key><string>1.0.0</string>
+<key>CFBundleVersion</key><string>18</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>LSUIElement</key><true/>
 <key>NSLocalNetworkUsageDescription</key><string>Rokaconnect sends and receives files with your iPhone and Android phones over your local network.</string>
